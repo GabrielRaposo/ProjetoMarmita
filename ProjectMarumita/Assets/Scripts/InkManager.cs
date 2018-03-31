@@ -9,33 +9,48 @@ using RedBlueGames.Tools.TextTyper;
 
 public class InkManager : MonoBehaviour {
 
+    [Header("Ink Assets")]
     public TextAsset inkJSONAsset;
-    public TextMeshProUGUI narrationBox, dialogBox;
-    public TextTyper narrationTyper;
-    public Button buttonPrefab;
+
+    [Header("UI References")]
+    public TextMeshProUGUI dialogBox;
+    public GameObject dialogPanel;
+    public GameObject proceedArrow;
     public RectTransform buttonsCanvas;
 
-    private Story story;
-    private bool textIsRunning;
+    [Header("Manager References")]
+    public CharacterManager characterPortrait;
+    public BackgroundManager backgroundManager;
 
-    //typewrite stuff
+    [Header("Prefabs & Values")]
+    public TextMeshProUGUI textPrefab;
+    public Button buttonPrefab;
+    public Color dialogTextColor;
+    public Color narrationTextColor;
     [Range(1f, 10f)] public float textSpeed = 5;
-    [Range(1f, 10f)] public float commaDelayMultiplier = 5;
-    [Range(1f, 10f)] public float ponctuationDelayMultiplier = 5;
 
-    AudioSource typeSound;
+    Story story;
+    TextTyper dialogTyper;
+    bool textIsRunning;
 
-    enum State { Narration, Dialog }
+    [Header("Audio References")]
+    public AudioSource typeSound;
+    public AudioSource beepSound;
+    public AudioSource confirmSound;
+
+    public enum State { Narration, Dialog, Choice }
+    public State state;
 
     private void Awake() {
-        typeSound = GetComponent<AudioSource>();
+        dialogTyper = dialogBox.GetComponent<TextTyper>();
 
         StartStory();
     }
 
     private void Update() {
-        if (Input.GetMouseButtonDown(0)) {
-            if (narrationTyper.IsSkippable()) narrationTyper.Skip();
+        if (Input.GetButtonDown("Fire1")) {
+            if (dialogTyper && dialogTyper.IsSkippable())
+                dialogTyper.Skip();
         }
     }
 
@@ -43,42 +58,138 @@ public class InkManager : MonoBehaviour {
         story = new Story(inkJSONAsset.text);
         SetExternalFunction();
 
-        CallStorytelling();
+        InterpretStory();
     }
 
     private void SetExternalFunction() {
         story.BindExternalFunction("change_background", (int ID) => ChangeBackground(ID));
     }
 
-    private void ClearTexts() {
-        if (narrationBox) narrationBox.text = string.Empty;
-        if (dialogBox) dialogBox.text = string.Empty;
+    private void InterpretStory() {
+        ClearButtons();
+        SetDialogState();
+
+        float typeSpeed = 1f / (textSpeed * 10);
+        if (story.canContinue) {
+            string section = story.Continue();
+            if(IsDialog(section)) {
+                for(int i = 0; i < section.Length; i++) {
+                    if(section[i] == ']') section = section.Substring(i + 1).TrimStart();
+                }
+                SetDialogState();
+            } else {
+                SetNarrationState();
+            }
+            dialogTyper.TypeText(section, typeSpeed);
+            dialogTyper.PrintCompleted.RemoveAllListeners();
+            dialogTyper.PrintCompleted.AddListener(() => StartCoroutine(DialogLoop()));
+            dialogTyper.CharacterPrinted.AddListener((string str) => PlayTypeSound());
+        }
     }
 
-    private void CallStorytelling() {
-        ClearTexts();
+    /* private void InterpretStory()
+    {
         ClearButtons();
 
-        string text = string.Empty;
-        while (story.canContinue) {
+        float typeSpeed = 1f / (textSpeed * 10);
+        if (story.canContinue)
+        {
             string section = story.Continue();
-            //checa se é dialogo
-            text += section;
+            if (IsDialog(section))
+            {
+                for (int i = 0; i < section.Length; i++)
+                {
+                    if (section[i] == ']') section = section.Substring(i + 1).TrimStart();
+                }
+
+                SetDialogState();
+                dialogTyper.TypeText(section, typeSpeed);
+                dialogTyper.PrintCompleted.RemoveAllListeners();
+                dialogTyper.PrintCompleted.AddListener(() => StartCoroutine(DialogLoop()));
+                dialogTyper.CharacterPrinted.AddListener((string str) => PlayTypeSound());
+            }
+            else
+            {
+                SetNarrationState();
+
+                TextMeshProUGUI storyText = Instantiate(textPrefab) as TextMeshProUGUI;
+                storyText.transform.SetParent(narrationPanel.transform, false);
+                narrationTyper = storyText.GetComponent<TextTyper>();
+
+                narrationTyper.TypeText(section, typeSpeed);
+                narrationTyper.PrintCompleted.RemoveAllListeners();
+                narrationTyper.PrintCompleted.AddListener(() => StartCoroutine(NarrationLoop()));
+                narrationTyper.CharacterPrinted.AddListener((string str) => PlayTypeSound());
+            }
         }
-        narrationTyper.TypeText(text, 1f / (textSpeed*10));
-        narrationTyper.PrintCompleted.RemoveAllListeners();
-        narrationTyper.PrintCompleted.AddListener(() => StartCoroutine(SetText()));
-        narrationTyper.CharacterPrinted.AddListener((string str) => PlayTypeSound());
+    }
+    */
+
+    //se retornar algo igual, é porque mudou nada e não é tag
+    private bool IsDialog(string section){
+        string tag = string.Empty;
+        section = section.Trim();
+        if(section[0] == '[') {
+            int index = 0;
+            while (section[index] != ']') {
+                index++;
+            }
+            tag = section.Remove(index + 1);
+            log("tag: " + tag);
+        }
+        char[] removeList = { '[' , ']' };
+        characterPortrait.SetPortrait(tag.Trim(removeList));
+        return !(tag == string.Empty);
     }
 
-    private void PlayTypeSound() {
-        if(!typeSound.isPlaying) typeSound.Play();
+    private void SetNarrationState() {
+        dialogBox.color = narrationTextColor;
+        characterPortrait.gameObject.SetActive(false);
+        dialogPanel.SetActive(true);
+        state = State.Narration;
+    }
+
+    private void SetDialogState() {
+        dialogBox.color = dialogTextColor;
+        characterPortrait.gameObject.SetActive(true);
+        dialogPanel.SetActive(true);
+        state = State.Dialog;
+    }
+
+    private void SetChoiceState() {
+        characterPortrait.gameObject.SetActive(false);
+        dialogPanel.SetActive(false);
+        state = State.Choice;
+    }
+
+    IEnumerator NarrationLoop() {
+        if (story.canContinue) {
+            yield return new WaitForSeconds(1); 
+            InterpretStory();
+        } else {
+            CallButtons();
+        }
+    }
+
+    IEnumerator DialogLoop() {
+        //mostrar seta de "next"
+        yield return new WaitForEndOfFrame();
+        proceedArrow.SetActive(true);
+        yield return new WaitUntil(() => Input.GetButtonDown("Fire1"));
+        beepSound.Play();
+        proceedArrow.SetActive(false);
+        if (story.canContinue) {
+            InterpretStory();
+        } else {
+            CallButtons();
+            //SetNarrationState();
+        }
     }
 
     private void CallButtons() {
+        SetChoiceState();
         if (story.currentChoices.Count > 0) {
-            for (int i = 0; i < story.currentChoices.Count; i++)
-            {
+            for (int i = 0; i < story.currentChoices.Count; i++) {
                 Choice choice = story.currentChoices[i];
                 Button button = CreateChoiceView(choice.text.Trim());
                 button.onClick.AddListener(delegate
@@ -88,18 +199,13 @@ public class InkManager : MonoBehaviour {
             }
         } else {
             log("call End of Story.");
-            Button choice = CreateChoiceView("End of story.\nRestart?");
+            Button choice = CreateChoiceView("End of story. Restart?");
             choice.onClick.AddListener(delegate { StartStory(); });
         }
     }
 
-    IEnumerator SetText() {
-        if (story.canContinue) {
-            yield return new WaitForSeconds(1); 
-            CallStorytelling();
-        } else {
-            CallButtons();
-        }
+    private void PlayTypeSound() {
+        if(!typeSound.isPlaying) typeSound.Play();
     }
 
     Button CreateChoiceView (string text) {
@@ -109,15 +215,13 @@ public class InkManager : MonoBehaviour {
         TextMeshProUGUI choiceText = choice.GetComponentInChildren<TextMeshProUGUI>();
 		choiceText.text = text;
 
-		HorizontalLayoutGroup layoutGroup = choice.GetComponent <HorizontalLayoutGroup> ();
-		layoutGroup.childForceExpandHeight = false;
-
 		return choice;
 	}
 
     void OnClickChoiceButton (Choice choice) {
 		story.ChooseChoiceIndex (choice.index);
-        CallStorytelling();
+        if (confirmSound) confirmSound.Play();
+        InterpretStory();
 	}
 
     void ClearButtons() {
@@ -127,12 +231,9 @@ public class InkManager : MonoBehaviour {
         }
     }
 
-    void SetCharacter(int ID) {
-
-    }
-
     void ChangeBackground(int ID) {
         Debug.Log("ID: " + ID);
+        backgroundManager.SetBG(ID);
     }
 
     void log(string str) { Debug.Log(str); }
