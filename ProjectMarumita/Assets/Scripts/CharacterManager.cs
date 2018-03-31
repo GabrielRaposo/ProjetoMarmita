@@ -9,12 +9,6 @@ public class CharacterManager : MonoBehaviour {
     public Image portraitImage;
     public TextMeshProUGUI nameBox;
 
-	[System.Serializable]
-    public struct CharacterInfo {
-        public string tag;
-        public string name;
-        public Sprite image;
-    }
     public CharacterInfo[] charactersInfo;
     public CharacterInfo current { get; private set; }
 
@@ -31,7 +25,7 @@ public class CharacterManager : MonoBehaviour {
     }
 
     private void SetInfo(CharacterInfo info) {
-        nameBox.text = info.name;
-        portraitImage.sprite = info.image;
+        nameBox.text = info.nickname;
+        portraitImage.sprite = info.sprite;
     }
 }

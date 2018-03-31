@@ -17,6 +17,7 @@ public class InkManager : MonoBehaviour {
     public GameObject dialogPanel;
     public GameObject proceedArrow;
     public RectTransform buttonsCanvas;
+    public Button clickArea;
 
     [Header("Manager References")]
     public CharacterManager characterPortrait;
@@ -27,11 +28,8 @@ public class InkManager : MonoBehaviour {
     public Button buttonPrefab;
     public Color dialogTextColor;
     public Color narrationTextColor;
-    [Range(1f, 10f)] public float textSpeed = 5;
+    [Range(0f, 1f)] public float textSpeed = .5f;
 
-    Story story;
-    TextTyper dialogTyper;
-    bool textIsRunning;
 
     [Header("Audio References")]
     public AudioSource typeSound;
@@ -41,17 +39,23 @@ public class InkManager : MonoBehaviour {
     public enum State { Narration, Dialog, Choice }
     public State state;
 
+    Story story;
+    TextTyper dialogTyper;
+    static public InkManager instance;
+
     private void Awake() {
+        if (!instance)
+            instance = this;
+        else
+            Destroy(gameObject);
         dialogTyper = dialogBox.GetComponent<TextTyper>();
 
         StartStory();
     }
 
-    private void Update() {
-        if (Input.GetButtonDown("Fire1")) {
-            if (dialogTyper && dialogTyper.IsSkippable())
-                dialogTyper.Skip();
-        }
+    void SkipText() {
+        if (dialogTyper && dialogTyper.IsSkippable())
+            dialogTyper.Skip();
     }
 
     private void StartStory() {
@@ -62,14 +66,18 @@ public class InkManager : MonoBehaviour {
     }
 
     private void SetExternalFunction() {
-        story.BindExternalFunction("change_background", (int ID) => ChangeBackground(ID));
+        story.BindExternalFunction("change_background", (string TAG) => ChangeBackground(TAG));
     }
 
     private void InterpretStory() {
         ClearButtons();
         SetDialogState();
 
-        float typeSpeed = 1f / (textSpeed * 10);
+        //float typeSpeed = 1f / (textSpeed * 10);
+        float typeSpeed = (2.5001f - (textSpeed * 2.5f))/80;
+        log("typeSpeed: " + typeSpeed);
+
+
         if (story.canContinue) {
             string section = story.Continue();
             if(IsDialog(section)) {
@@ -82,8 +90,10 @@ public class InkManager : MonoBehaviour {
             }
             dialogTyper.TypeText(section, typeSpeed);
             dialogTyper.PrintCompleted.RemoveAllListeners();
-            dialogTyper.PrintCompleted.AddListener(() => StartCoroutine(DialogLoop()));
+            dialogTyper.PrintCompleted.AddListener(() => StartCoroutine(DialogHalt()));
             dialogTyper.CharacterPrinted.AddListener((string str) => PlayTypeSound());
+
+            clickArea.onClick.AddListener(() => SkipText());
         }
     }
 
@@ -162,27 +172,21 @@ public class InkManager : MonoBehaviour {
         state = State.Choice;
     }
 
-    IEnumerator NarrationLoop() {
-        if (story.canContinue) {
-            yield return new WaitForSeconds(1); 
-            InterpretStory();
-        } else {
-            CallButtons();
-        }
+    IEnumerator DialogHalt() {
+        clickArea.onClick.RemoveAllListeners();
+        for (int i = 0; i < 3; i++) yield return new WaitForEndOfFrame();
+        proceedArrow.SetActive(true);
+        clickArea.onClick.AddListener(() => DialogLoop());
     }
 
-    IEnumerator DialogLoop() {
-        //mostrar seta de "next"
-        yield return new WaitForEndOfFrame();
-        proceedArrow.SetActive(true);
-        yield return new WaitUntil(() => Input.GetButtonDown("Fire1"));
+    void DialogLoop() {
+        clickArea.onClick.RemoveAllListeners();
         beepSound.Play();
         proceedArrow.SetActive(false);
         if (story.canContinue) {
             InterpretStory();
         } else {
             CallButtons();
-            //SetNarrationState();
         }
     }
 
@@ -234,6 +238,24 @@ public class InkManager : MonoBehaviour {
     void ChangeBackground(int ID) {
         Debug.Log("ID: " + ID);
         backgroundManager.SetBG(ID);
+    }
+
+    void ChangeBackground(string tag) {
+        Debug.Log("tag: " + tag);
+        backgroundManager.SetBG(tag);
+    }
+
+    public void SetPause(bool value) {
+        if (value) {
+            SkipText();
+        } else {
+
+        }
+        clickArea.gameObject.SetActive(!value);
+    }
+
+    public void SetTextSpeed(float value) {
+        textSpeed = value; 
     }
 
     void log(string str) { Debug.Log(str); }
